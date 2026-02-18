@@ -11,10 +11,28 @@ class AIRemoteDataSourceImpl implements AIRemoteDataSource {
   ChatSession? _chatSession;
 
   AIRemoteDataSourceImpl() {
-    _model = GenerativeModel(
-      model: 'gemini-3-flash-preview',
-      apiKey: AppConstants.geminiApiKey,
-    );
+    try {
+      final apiKey = AppConstants.geminiApiKey;
+      if (apiKey.isEmpty) {
+        throw Exception(
+          'Gemini API key is not configured. Please check your .env file.',
+        );
+      }
+
+      _model = GenerativeModel(
+        model: 'gemini-3-flash-preview',
+        apiKey: apiKey,
+        generationConfig: GenerationConfig(
+          temperature: 0.7,
+          maxOutputTokens: 800,
+        ),
+      );
+
+      print('✅ Gemini model initialized successfully');
+    } catch (e) {
+      print('❌ Failed to initialize Gemini model: $e');
+      rethrow;
+    }
   }
 
   @override

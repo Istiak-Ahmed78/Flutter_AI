@@ -1,7 +1,14 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConstants {
-  static const String appName = 'FL AI';
-  static const String geminiApiKey =
-      'AIzaSyAgU9Ahj3gG7wlT-3RCta-5xUbkWFMKc-Y'; // Move to env later
+  static String get appName => dotenv.env['APP_NAME'] ?? 'FL AI Assistant';
+  static String get geminiApiKey {
+    final key = dotenv.env['GEMINI_API_KEY'];
+    if (key == null || key.isEmpty) {
+      throw Exception('GEMINI_API_KEY not found in .env file');
+    }
+    return key;
+  }
 
   // Speech settings
   static const double speechRate = 0.5;
