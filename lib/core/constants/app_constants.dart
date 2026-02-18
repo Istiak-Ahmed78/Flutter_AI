@@ -1,7 +1,7 @@
 class AppConstants {
   static const String appName = 'FL AI';
   static const String geminiApiKey =
-      'AIzaSyAgU9Ahj3gG7wlT-3RCta-5xUbkWFMKc-Y'; // Move to env later
+      ''; // Move to env later
 
   // Speech settings
   static const double speechRate = 0.5;
