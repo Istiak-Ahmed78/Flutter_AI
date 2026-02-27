@@ -150,12 +150,17 @@ class ToolExecutor {
   // ── 📞 CALL ───────────────────────────────────────
   static Future<Map<String, dynamic>> _makeCall(String contactName) async {
     try {
-      // ── Step 1: Check if permanently denied ──────
-      final status = await Permission.contacts.status;
-      print('📞 [Call] Permission status: $status');
+      print('📞 [Call] Starting call to: "$contactName"');
 
-      if (status.isPermanentlyDenied) {
-        print('❌ [Call] Permanently denied → opening app settings');
+      // ── Step 1: Check permanent denial first ─────
+      final contactsStatus = await Permission.contacts.status;
+      final phoneStatus = await Permission.phone.status;
+
+      print('📞 [Call] Contacts permission: $contactsStatus');
+      print('📞 [Call] Phone permission   : $phoneStatus');
+
+      if (contactsStatus.isPermanentlyDenied) {
+        print('❌ [Call] Contacts permanently denied → opening settings');
         await openAppSettings();
         return {
           'success': false,
@@ -165,46 +170,139 @@ class ToolExecutor {
         };
       }
 
-      // ── Step 2: Request permission ────────────────
-      if (!await FlutterContacts.requestPermission()) {
-        return {'success': false, 'error': 'Contacts permission denied'};
-      }
-
-      // ── Step 3: Search contacts ───────────────────
-      final contacts = await FlutterContacts.getContacts(withProperties: true);
-      print('📞 [Call] Total contacts: ${contacts.length}');
-
-      final match = contacts.firstWhere(
-        (c) => c.displayName.toLowerCase().contains(contactName.toLowerCase()),
-        orElse: () => Contact(),
-      );
-
-      if (match.phones.isEmpty) {
-        print('❌ [Call] No number found for "$contactName"');
+      if (phoneStatus.isPermanentlyDenied) {
+        print('❌ [Call] Phone permanently denied → opening settings');
+        await openAppSettings();
         return {
           'success': false,
-          'error': 'No contact named "$contactName" found.',
+          'error':
+              'Phone permission permanently denied. '
+              'Please enable it in Settings.',
         };
       }
 
-      // ── Step 4: Dial ──────────────────────────────
-      final phoneNumber = match.phones.first.number;
+      // ── Step 2: Request permissions SEPARATELY ────
+      // Request contacts permission first
+      if (!contactsStatus.isGranted) {
+        print('📞 [Call] Requesting contacts permission...');
+        final contactsResult = await Permission.contacts.request();
+        print('📞 [Call] Contacts result: $contactsResult');
+
+        if (!contactsResult.isGranted) {
+          print('❌ [Call] Contacts permission denied');
+          return {
+            'success': false,
+            'error':
+                'Contacts permission denied. '
+                'Please allow contacts access to make calls.',
+          };
+        }
+      }
+
+      // Request phone permission separately
+      if (!phoneStatus.isGranted) {
+        print('📞 [Call] Requesting phone permission...');
+        final phoneResult = await Permission.phone.request();
+        print('📞 [Call] Phone result: $phoneResult');
+
+        if (!phoneResult.isGranted) {
+          print('❌ [Call] Phone permission denied');
+          return {
+            'success': false,
+            'error':
+                'Phone call permission denied. '
+                'Please allow phone access to make calls.',
+          };
+        }
+      }
+
+      print('✅ [Call] Both permissions granted');
+
+      // ── Step 3: Load contacts ─────────────────────
+      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      print('📞 [Call] Total contacts loaded: ${contacts.length}');
+
+      if (contacts.isEmpty) {
+        return {'success': false, 'error': 'No contacts found on this device.'};
+      }
+
+      // ── Step 4: Find best match ───────────────────
+      Contact? match;
+
+      // Exact match first (case-insensitive)
+      try {
+        match = contacts.firstWhere(
+          (c) =>
+              c.displayName.toLowerCase().trim() ==
+              contactName.toLowerCase().trim(),
+        );
+        print('✅ [Call] Exact match: ${match.displayName}');
+      } catch (_) {
+        match = null;
+      }
+
+      // Partial match if no exact match
+      if (match == null || match.id.isEmpty) {
+        try {
+          match = contacts.firstWhere(
+            (c) => c.displayName.toLowerCase().contains(
+              contactName.toLowerCase().trim(),
+            ),
+          );
+          print('✅ [Call] Partial match: ${match.displayName}');
+        } catch (_) {
+          match = null;
+        }
+      }
+
+      // ── Step 5: Validate match ────────────────────
+      if (match == null || match.id.isEmpty) {
+        print('❌ [Call] No contact found for "$contactName"');
+        return {
+          'success': false,
+          'error':
+              'No contact named "$contactName" found. '
+              'Please check the name and try again.',
+        };
+      }
+
+      if (match.phones.isEmpty) {
+        print('❌ [Call] No phone number for: ${match.displayName}');
+        return {
+          'success': false,
+          'error': '${match.displayName} has no phone number saved.',
+        };
+      }
+
+      // ── Step 6: Dial ──────────────────────────────
+      final rawNumber = match.phones.first.number;
+      final phoneNumber = rawNumber.replaceAll(RegExp(r'[\s\-\(\)]'), '');
       final uri = Uri.parse('tel:$phoneNumber');
+
+      print('📞 [Call] Dialing: ${match.displayName} → $phoneNumber');
 
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
-        print('✅ [Call] Calling ${match.displayName} → $phoneNumber');
+        print('✅ [Call] Call launched successfully');
         return {
           'success': true,
+          'message': 'Calling ${match.displayName}',
           'contact': match.displayName,
           'number': phoneNumber,
         };
       }
 
-      return {'success': false, 'error': 'Cannot launch dialer'};
+      print('❌ [Call] Cannot launch dialer');
+      return {
+        'success': false,
+        'error': 'Cannot open the phone dialer on this device.',
+      };
     } catch (e) {
-      print('❌ [Call] Error: $e');
-      return {'success': false, 'error': e.toString()};
+      print('❌ [Call] Unexpected error: $e');
+      return {
+        'success': false,
+        'error': 'Failed to make call: ${e.toString()}',
+      };
     }
   }
 
