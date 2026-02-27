@@ -10,6 +10,18 @@ class AppConstants {
     return key;
   }
 
+  // ── OpenWeather API Key ───────────────────────
+  static String get openWeatherApiKey {
+    final key = dotenv.env['OPENWEATHER_API_KEY'] ?? '';
+    if (key.isEmpty) {
+      throw Exception(
+        '❌ OPENWEATHER_API_KEY is missing in .env file.\n'
+        '   Add: OPENWEATHER_API_KEY=your_key_here',
+      );
+    }
+    return key;
+  }
+
   // Speech settings
   static const double speechRate = 0.5;
   static const double pitch = 1.0;

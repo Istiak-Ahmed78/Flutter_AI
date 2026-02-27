@@ -1,3 +1,4 @@
+import 'package:fl_ai/core/tools/tool_executor.dart';
 import 'package:fl_ai/domain/usecases/clear_chat_history_usecase.dart';
 import 'package:get_it/get_it.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -30,7 +31,7 @@ Future<void> init() async {
 
   // Core
 
-  // External
+  await ToolExecutor.init();
 }
 
 void _initSpeechFeatures() {
