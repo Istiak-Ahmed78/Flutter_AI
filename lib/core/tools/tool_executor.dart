@@ -5,6 +5,7 @@ import 'package:fl_ai/core/constants/app_constants.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart'; // ✅ NEW
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -59,13 +60,18 @@ class ToolExecutor {
       case 'open_web_search':
         return await _openWebSearch(args['query'] as String);
 
+      case 'get_time': // ✅ NEW
+        return _getTime();
+
+      case 'get_date': // ✅ NEW
+        return _getDate();
+
       default:
         return {'success': false, 'error': 'Unknown tool: $toolName'};
     }
   }
 
   // ── 🌤️ WEATHER ───────────────────────────────────
-  // ✅ No changes needed — already working
   static Future<Map<String, dynamic>> _getWeather(String location) async {
     try {
       final apiKey = AppConstants.openWeatherApiKey;
@@ -94,7 +100,6 @@ class ToolExecutor {
   }
 
   // ── ⏰ ALARM ──────────────────────────────────────
-  // ✅ No changes needed — already working
   static Future<Map<String, dynamic>> _setAlarm(
     String time,
     String label,
@@ -143,7 +148,6 @@ class ToolExecutor {
   }
 
   // ── 📞 CALL ───────────────────────────────────────
-  // ✅ FIXED — handle permanently denied permission
   static Future<Map<String, dynamic>> _makeCall(String contactName) async {
     try {
       // ── Step 1: Check if permanently denied ──────
@@ -151,7 +155,6 @@ class ToolExecutor {
       print('📞 [Call] Permission status: $status');
 
       if (status.isPermanentlyDenied) {
-        // Can't show dialog again — must redirect to Settings
         print('❌ [Call] Permanently denied → opening app settings');
         await openAppSettings();
         return {
@@ -206,19 +209,16 @@ class ToolExecutor {
   }
 
   // ── 🔦 FLASHLIGHT ─────────────────────────────────
-  // ✅ FIXED — replaced MethodChannel with torch_light package
   static Future<Map<String, dynamic>> _toggleFlashlight(String state) async {
     try {
       final turnOn = state.toLowerCase() == 'on';
 
-      // ── Check torch availability first ────────────
       final hasTorch = await TorchLight.isTorchAvailable();
       if (!hasTorch) {
         print('❌ [Flashlight] No torch on this device');
         return {'success': false, 'error': 'This device has no flashlight'};
       }
 
-      // ── Toggle ────────────────────────────────────
       if (turnOn) {
         await TorchLight.enableTorch();
         print('✅ [Flashlight] Turned ON');
@@ -229,7 +229,6 @@ class ToolExecutor {
 
       return {'success': true, 'state': state};
     } on EnableTorchExistentUserException catch (_) {
-      // Camera is currently in use by another app
       print('❌ [Flashlight] Camera in use — cannot enable torch');
       return {'success': false, 'error': 'Camera is in use by another app'};
     } on EnableTorchNotAvailableException catch (_) {
@@ -254,21 +253,17 @@ class ToolExecutor {
   }
 
   // ── 🌐 WEB SEARCH ─────────────────────────────────
-  // ✅ FIXED — Uri.https() builder + platformDefault fallback
   static Future<Map<String, dynamic>> _openWebSearch(String query) async {
     try {
-      // ✅ Uri.https() handles encoding automatically — no manual encode needed
       final uri = Uri.https('www.google.com', '/search', {'q': query});
       print('🌐 [Search] Launching: $uri');
 
-      // ✅ Try externalApplication first
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
         print('✅ [Search] Opened: $query');
         return {'success': true, 'query': query};
       }
 
-      // ✅ Fallback to platformDefault (lets OS decide)
       final fallback = await launchUrl(uri, mode: LaunchMode.platformDefault);
       if (fallback) {
         print('✅ [Search] Opened via fallback: $query');
@@ -279,6 +274,65 @@ class ToolExecutor {
       return {'success': false, 'error': 'Cannot open browser'};
     } catch (e) {
       print('❌ [Search] Error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // ── 🕐 TIME ───────────────────────────────────────  ✅ NEW
+  static Map<String, dynamic> _getTime() {
+    try {
+      final now = DateTime.now();
+      final time12h = DateFormat('hh:mm:ss a').format(now); // 09:45:30 PM
+      final time24h = DateFormat('HH:mm:ss').format(now); // 21:45:30
+      final timezone = now.timeZoneName; // BDT / UTC+6
+      final offsetHours = now.timeZoneOffset.inHours;
+      final offsetMins = now.timeZoneOffset.inMinutes.abs() % 60;
+      final offsetStr =
+          'UTC${offsetHours >= 0 ? '+' : ''}$offsetHours'
+          '${offsetMins > 0 ? ':$offsetMins' : ''}';
+
+      print('✅ [Time] $time12h ($timezone / $offsetStr)');
+
+      return {
+        'success': true,
+        'time_12h': time12h, // "09:45:30 PM"
+        'time_24h': time24h, // "21:45:30"
+        'timezone': timezone, // "BDT"
+        'utc_offset': offsetStr, // "UTC+6"
+        'timestamp': now.millisecondsSinceEpoch,
+      };
+    } catch (e) {
+      print('❌ [Time] Error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // ── 📅 DATE ───────────────────────────────────────  ✅ NEW
+  static Map<String, dynamic> _getDate() {
+    try {
+      final now = DateTime.now();
+      final dateFull = DateFormat(
+        'EEEE, MMMM d, y',
+      ).format(now); // Friday, February 28, 2026
+      final dateShort = DateFormat('dd/MM/yyyy').format(now); // 28/02/2026
+      final dateIso = DateFormat('yyyy-MM-dd').format(now); // 2026-02-28
+      final dayOfWeek = DateFormat('EEEE').format(now); // Friday
+      final month = DateFormat('MMMM').format(now); // February
+
+      print('✅ [Date] $dateFull');
+
+      return {
+        'success': true,
+        'date_full': dateFull, // "Friday, February 28, 2026"
+        'date_short': dateShort, // "28/02/2026"
+        'date_iso': dateIso, // "2026-02-28"
+        'day_of_week': dayOfWeek, // "Friday"
+        'month': month, // "February"
+        'day': now.day, // 28
+        'year': now.year, // 2026
+      };
+    } catch (e) {
+      print('❌ [Date] Error: $e');
       return {'success': false, 'error': e.toString()};
     }
   }
