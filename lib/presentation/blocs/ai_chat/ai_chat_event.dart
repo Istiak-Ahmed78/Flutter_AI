@@ -17,6 +17,22 @@ class SendMessageEvent extends AIChatEvent {
   List<Object> get props => [message, shouldSpeak];
 }
 
+// ✅ NEW: Send message with image
+class SendMessageWithImageEvent extends AIChatEvent {
+  final String message;
+  final File imageFile;
+  final bool shouldSpeak;
+
+  const SendMessageWithImageEvent({
+    required this.message,
+    required this.imageFile,
+    this.shouldSpeak = true,
+  });
+
+  @override
+  List<Object> get props => [message, imageFile, shouldSpeak];
+}
+
 class LoadChatHistoryEvent extends AIChatEvent {}
 
 class ClearChatHistoryEvent extends AIChatEvent {}

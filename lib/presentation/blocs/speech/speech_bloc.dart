@@ -1,8 +1,5 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:dartz/dartz.dart';
-
-import '../../../core/errors/failures.dart';
 import '../../../core/usecases/usecase.dart';
 import '../../../domain/usecases/listen_to_speech_usecase.dart';
 import '../../../domain/usecases/speak_text_usecase.dart';

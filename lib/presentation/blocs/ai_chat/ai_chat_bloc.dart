@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:equatable/equatable.dart';
 import 'package:fl_ai/domain/usecases/clear_chat_history_usecase.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';

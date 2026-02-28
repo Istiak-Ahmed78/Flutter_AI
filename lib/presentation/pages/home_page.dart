@@ -5,6 +5,7 @@ import '../blocs/ai_chat/ai_chat_bloc.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/mic_button.dart';
 import '../widgets/listening_indicator.dart';
+import 'camera_page.dart'; // ✅ NEW
 import '../../../injection_container.dart';
 
 class HomePage extends StatefulWidget {
@@ -30,7 +31,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _speechBloc = sl<SpeechBloc>();
     _aiChatBloc = sl<AIChatBloc>();
 
-    // Load chat history
     _aiChatBloc.add(LoadChatHistoryEvent());
   }
 
@@ -59,25 +59,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           backgroundColor: Colors.deepPurple,
           foregroundColor: Colors.white,
           actions: [
+            // ✅ NEW: Camera button
+            IconButton(
+              icon: const Icon(Icons.camera_alt),
+              tooltip: 'AI Camera',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CameraPage()),
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.delete_outline),
               onPressed: () {
                 _aiChatBloc.add(ClearChatHistoryEvent());
               },
             ),
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () {
-                // Navigate to settings
-              },
-            ),
+            IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
           ],
         ),
         body: BlocBuilder<AIChatBloc, AIChatState>(
           builder: (context, chatState) {
             return Column(
               children: [
-                // Chat messages
                 Expanded(
                   child: BlocBuilder<AIChatBloc, AIChatState>(
                     builder: (context, state) {
@@ -102,7 +107,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   ),
                 ),
 
-                // Typing indicator
                 if (chatState is AIChatLoaded && chatState.isTyping)
                   const Padding(
                     padding: EdgeInsets.all(8.0),
@@ -120,7 +124,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ),
                   ),
 
-                // Voice input area
                 BlocConsumer<SpeechBloc, SpeechState>(
                   listener: (context, state) {
                     if (state is SpeechResult) {

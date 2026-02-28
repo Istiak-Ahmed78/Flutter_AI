@@ -1,17 +1,17 @@
-// lib/data/datasources/remote/ai_remote_datasource.dart
-
+import 'dart:io';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/tools/tool_executor.dart';
 import '../../../core/tools/tool_registry.dart';
-import '../../../core/ai/gemini_model_manager.dart'; // ✅ NEW
+import '../../../core/ai/gemini_model_manager.dart';
 
 // ─────────────────────────────────────────────
 // Abstract contract
 // ─────────────────────────────────────────────
 abstract class AIRemoteDataSource {
   Future<String> getAIResponse(String query);
+  Future<String> getAIResponseWithImage(String query, File imageFile); // ✅ NEW
   void resetSession();
 }
 
@@ -19,16 +19,22 @@ abstract class AIRemoteDataSource {
 // Implementation
 // ─────────────────────────────────────────────
 class AIRemoteDataSourceImpl implements AIRemoteDataSource {
-  // ── No longer a fixed model — managed dynamically ✅
   ChatSession? _chatSession;
-  String? _currentModelName; // ✅ NEW — tracks active model
+  String? _currentModelName;
 
-  // ── Replace the static _systemPrompt with this method ──
+  // ── Vision-capable models in priority order ──────────────────────
+  // gemini-1.5-flash and pro both support image input via inlineData
+  static const List<String> _visionModels = [
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.0-flash',
+  ];
 
-  // ❌ DELETE this line:
-  // static const String _systemPrompt = ''' ... ''';
+  AIRemoteDataSourceImpl();
 
-  // ✅ ADD this method instead:
+  // ─────────────────────────────────────────────────────────────────
+  // System prompt (same as before)
+  // ─────────────────────────────────────────────────────────────────
   static String _buildSystemPrompt() {
     final now = DateTime.now();
 
@@ -91,9 +97,9 @@ When asked for the time or date, use the current date and time provided above.
 ''';
   }
 
-  AIRemoteDataSourceImpl();
-
-  // ── Build a model instance for any model name ─────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Build a text-only model (same as before)
+  // ─────────────────────────────────────────────────────────────────
   GenerativeModel _buildModel(String modelName) {
     final apiKey = AppConstants.geminiApiKey;
 
@@ -113,11 +119,40 @@ When asked for the time or date, use the current date and time provided above.
     );
   }
 
-  // ── Get or create chat session ────────────────────────────────────
-  // Resets session if model has switched
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW: Build a vision model (no tools — image + text only)
+  // Tools are NOT passed here because Gemini vision calls are
+  // one-shot generateContent(), not agentic chat sessions.
+  // ─────────────────────────────────────────────────────────────────
+  GenerativeModel _buildVisionModel(String modelName) {
+    final apiKey = AppConstants.geminiApiKey;
+
+    if (apiKey.isEmpty) {
+      throw Exception('Gemini API key is empty. Check AppConstants.');
+    }
+
+    return GenerativeModel(
+      model: modelName,
+      apiKey: apiKey,
+      // ⚠️ No tools here — vision is pure describe/analyze
+      systemInstruction: Content.system(
+        _buildSystemPrompt() +
+            '\n\nYou are also a visual AI. '
+                'When given an image, describe and analyze it clearly. '
+                'Answer the user\'s question about what you see in the image.',
+      ),
+      generationConfig: GenerationConfig(
+        temperature: 0.7,
+        maxOutputTokens: 1000,
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Get or create chat session
+  // ─────────────────────────────────────────────────────────────────
   Future<ChatSession> _getOrCreateSession(String modelName) async {
     if (_chatSession == null || _currentModelName != modelName) {
-      // ── Model switched or first run — create fresh session ────────
       if (_currentModelName != null && _currentModelName != modelName) {
         print('🔀 [Session] Model changed: $_currentModelName → $modelName');
         print('🔄 [Session] Starting fresh chat session');
@@ -130,26 +165,23 @@ When asked for the time or date, use the current date and time provided above.
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // Core: Send message + agentic tool loop + auto model switching ✅
+  // Text-only AI response (unchanged from your original)
   // ─────────────────────────────────────────────────────────────────
   @override
   Future<String> getAIResponse(String query) async {
     print('👤 User query: $query');
 
-    const maxModelSwitches = 3; // max times we can switch model per query
+    const maxModelSwitches = 3;
     int modelAttempts = 0;
 
     while (modelAttempts < maxModelSwitches) {
-      // ── Step 1: Get current best available model ───────────────────
       final modelName = await GeminiModelManager.getCurrentModel();
 
       try {
         final session = await _getOrCreateSession(modelName);
 
-        // ── Step 2: Send user message ──────────────────────────────
         var response = await session.sendMessage(Content.text(query));
 
-        // ── Step 3: Agentic loop — handle tool calls ───────────────
         int loopCount = 0;
         const maxLoops = 5;
 
@@ -161,7 +193,6 @@ When asked for the time or date, use the current date and time provided above.
             print('🔧 Tool requested : ${functionCall.name}');
             print('📦 Arguments      : ${functionCall.args}');
 
-            // ── Step 4: Execute tool on device ─────────────────────
             final toolResult = await ToolExecutor.execute(
               functionCall.name,
               functionCall.args,
@@ -169,7 +200,6 @@ When asked for the time or date, use the current date and time provided above.
 
             print('✅ Tool result: $toolResult');
 
-            // ── Step 5: Send result back to Gemini ─────────────────
             response = await session.sendMessage(
               Content.functionResponse(functionCall.name, toolResult),
             );
@@ -180,7 +210,6 @@ When asked for the time or date, use the current date and time provided above.
           print('⚠️ Max loop limit reached ($maxLoops).');
         }
 
-        // ── Step 6: Return final text ──────────────────────────────
         final finalText = response.text;
         if (finalText == null || finalText.trim().isEmpty) {
           return 'Action completed successfully.';
@@ -191,44 +220,33 @@ When asked for the time or date, use the current date and time provided above.
       } on GenerativeAIException catch (e) {
         print('❌ GenerativeAI error: ${e.message}');
 
-        // ── Quota / Rate limit → switch model ─────────────────────
         if (_isQuotaError(e.message)) {
           final retrySeconds = GeminiModelManager.parseRetrySeconds(e.message);
-
           print(
             '⚠️ [AutoSwitch] Quota hit on $modelName '
             '(retry in ${retrySeconds}s) — switching model...',
           );
-
           final nextModel = await GeminiModelManager.onQuotaExceeded(
             modelName,
             retrySeconds,
           );
-
           if (nextModel == modelName) {
-            // All models exhausted
             print('❌ [AutoSwitch] All models exhausted');
             return '⚠️ All AI models are currently busy. '
                 'Please try again in a minute!';
           }
-
           print('🔀 [AutoSwitch] Switching: $modelName → $nextModel');
           modelAttempts++;
-          continue; // ✅ Retry immediately with new model
+          continue;
         }
 
-        // ── Model not found / deprecated ──────────────────────────
         if (e.message.contains('not found')) {
           print('💡 HINT: Model "$modelName" is wrong or deprecated.');
-          print('💡 Marking as unavailable and switching...');
-
-          // Treat as long cooldown (6 hours)
           await GeminiModelManager.onQuotaExceeded(modelName, 21600);
           modelAttempts++;
           continue;
         }
 
-        // ── thought_signature bug ──────────────────────────────────
         if (e.message.contains('thought_signature')) {
           print('💡 HINT: thought_signature bug — switching model');
           await GeminiModelManager.onQuotaExceeded(modelName, 21600);
@@ -236,7 +254,6 @@ When asked for the time or date, use the current date and time provided above.
           continue;
         }
 
-        // ── Other Gemini errors — don't retry ─────────────────────
         throw Exception('Gemini API error: ${e.message}');
       } catch (e) {
         print('❌ Unexpected error: $e');
@@ -244,11 +261,130 @@ When asked for the time or date, use the current date and time provided above.
       }
     }
 
-    // All model switch attempts used up
     return '⚠️ Service temporarily unavailable. Please try again shortly.';
   }
 
-  // ── Detect quota / rate limit errors ──────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW: Image + Text AI response
+  //
+  // How it works:
+  //   1. Read image bytes from File
+  //   2. Build a Content with [TextPart, DataPart] — multimodal
+  //   3. Call generateContent() (one-shot, not chat session)
+  //   4. Return Gemini's description/analysis
+  //
+  // Ref: google_generative_ai SDK — Content.multi([TextPart, DataPart])
+  // ─────────────────────────────────────────────────────────────────
+  @override
+  Future<String> getAIResponseWithImage(String query, File imageFile) async {
+    print('📷 Image query: $query');
+    print('📁 Image path : ${imageFile.path}');
+
+    const maxModelSwitches = 3;
+    int modelAttempts = 0;
+
+    // Try vision models in order
+    int visionModelIndex = 0;
+
+    while (modelAttempts < maxModelSwitches &&
+        visionModelIndex < _visionModels.length) {
+      final modelName = _visionModels[visionModelIndex];
+
+      try {
+        // ── Step 1: Read image bytes ─────────────────────────────
+        final imageBytes = await imageFile.readAsBytes();
+        print('🖼️  Image loaded: ${imageBytes.lengthInBytes} bytes');
+
+        // ── Step 2: Detect MIME type from extension ──────────────
+        final mimeType = _getMimeType(imageFile.path);
+        print('📄 MIME type: $mimeType');
+
+        // ── Step 3: Build multimodal Content ────────────────────
+        // TextPart = user's question
+        // DataPart = raw image bytes with MIME type
+        final content = Content.multi([
+          TextPart(query),
+          DataPart(mimeType, imageBytes),
+        ]);
+
+        // ── Step 4: Build vision model & call generateContent ────
+        final model = _buildVisionModel(modelName);
+        print('🤖 Sending to vision model: $modelName');
+
+        final response = await model.generateContent([content]);
+
+        // ── Step 5: Extract text response ────────────────────────
+        final finalText = response.text;
+        if (finalText == null || finalText.trim().isEmpty) {
+          return 'I can see the image but could not generate a response.';
+        }
+
+        print('🤖 Vision response: $finalText');
+        return finalText;
+      } on GenerativeAIException catch (e) {
+        print('❌ Vision model error ($modelName): ${e.message}');
+
+        if (_isQuotaError(e.message)) {
+          print('⚠️ Quota hit on vision model $modelName — trying next...');
+          visionModelIndex++;
+          modelAttempts++;
+          continue;
+        }
+
+        if (e.message.contains('not found') ||
+            e.message.contains('thought_signature')) {
+          print('💡 Vision model issue — trying next model');
+          visionModelIndex++;
+          modelAttempts++;
+          continue;
+        }
+
+        // ── Image too large or unsupported format ────────────────
+        if (e.message.contains('image') ||
+            e.message.contains('INVALID_ARGUMENT')) {
+          print('❌ Image rejected by API: ${e.message}');
+          return '⚠️ Could not process this image. '
+              'Please try again with a clearer photo.';
+        }
+
+        throw Exception('Vision API error: ${e.message}');
+      } catch (e) {
+        print('❌ Unexpected vision error: $e');
+        throw Exception('Failed to analyze image: $e');
+      }
+    }
+
+    return '⚠️ Vision service temporarily unavailable. '
+        'Please try again shortly.';
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ Helper: Detect MIME type from file extension
+  // Gemini supports: image/jpeg, image/png, image/webp, image/heic
+  // ─────────────────────────────────────────────────────────────────
+  String _getMimeType(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'heic':
+        return 'image/heic';
+      case 'heif':
+        return 'image/heif';
+      default:
+        // Camera always saves as .jpg — safe default
+        return 'image/jpeg';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Detect quota / rate limit errors
+  // ─────────────────────────────────────────────────────────────────
   bool _isQuotaError(String error) {
     return error.contains('quota') ||
         error.contains('rate') ||
@@ -257,7 +393,9 @@ When asked for the time or date, use the current date and time provided above.
         error.contains('exceeded');
   }
 
-  // ── Reset session ──────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Reset session
+  // ─────────────────────────────────────────────────────────────────
   @override
   void resetSession() {
     _chatSession = null;
